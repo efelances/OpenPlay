@@ -192,6 +192,14 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     async def get_diagnostics():
         return {"checks": run_diagnostics(runtime)}
 
+    @app.get("/api/devices")
+    async def get_devices():
+        return runtime.list_devices()
+
+    @app.post("/api/audio/calibrate-noise")
+    async def calibrate_mic_noise():
+        return runtime.calibrate_mic_noise()
+
     @app.post("/api/profile/{profile_id}")
     async def select_profile(profile_id: str):
         return runtime.switch_profile(profile_id)

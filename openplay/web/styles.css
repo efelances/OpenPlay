@@ -524,6 +524,44 @@ input[type="range"] {
   cursor: pointer;
 }
 
+.telemetry-strip {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--c-muted);
+  padding: 0.42rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--c-border);
+  background: var(--c-bg);
+  margin-bottom: 0.75rem;
+}
+
+.hw-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 0.75rem;
+}
+
+.hw-section {
+  padding-top: 0.8rem;
+  margin-top: 0.2rem;
+  border-top: 1px solid var(--c-border);
+}
+
+select.hw-select {
+  flex: 1 1 170px;
+  min-width: 0;
+  padding: 0.48rem 0.65rem;
+  border-radius: 8px;
+  border: 1.5px solid var(--c-border);
+  background: var(--c-bg);
+  color: var(--c-fg);
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
 /* Profiller & Sistem Kontrolü */
 .profiles-grid {
   display: grid;

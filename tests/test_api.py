@@ -154,3 +154,42 @@ def test_diagnostics_endpoint_reports_expected_checks(fresh_data_dir: Path):
             "send_input",
             "vgamepad",
         }.issubset(ids)
+
+
+def test_devices_noise_calibration_and_hardware_settings_persist(fresh_data_dir: Path):
+    with TestClient(create_app(data_dir=fresh_data_dir)) as client:
+        r_no_cookie = client.post("/api/audio/calibrate-noise")
+        assert r_no_cookie.status_code == 403
+
+        r_devs = client.get("/api/devices")
+        assert r_devs.status_code == 200
+        devs = r_devs.json()
+        assert "cameras" in devs and "microphones" in devs
+
+        assert client.get("/").status_code == 200
+        cur = client.get("/api/state").json()["settings"]
+        cur["camera_index"] = 1
+        cur["low_light_camera_mode"] = False
+        cur["mic_gain"] = 8.5
+        cur["mic_noise_suppression"] = True
+        cur["mic_auto_gain"] = False
+        cur["mic_noise_floor"] = 0.042
+        r_upd = client.post("/api/settings", json=cur)
+        assert r_upd.status_code == 200
+        saved = r_upd.json()["settings"]
+        assert saved["camera_index"] == 1
+        assert saved["low_light_camera_mode"] is False
+        assert saved["mic_gain"] == 8.5
+        assert saved["mic_auto_gain"] is False
+        assert saved["mic_noise_floor"] == 0.042
+
+        r_cal = client.post("/api/audio/calibrate-noise")
+        assert r_cal.status_code == 200
+        assert "telemetry" in r_cal.json()
+
+    with TestClient(create_app(data_dir=fresh_data_dir)) as client2:
+        st2 = client2.get("/api/state").json()["settings"]
+        assert st2["camera_index"] == 1
+        assert st2["low_light_camera_mode"] is False
+        assert st2["mic_gain"] == 8.5
+        assert st2["mic_noise_floor"] == 0.042

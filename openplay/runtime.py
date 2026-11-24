@@ -58,6 +58,7 @@ class AccessRuntime:
         self._recent_outputs: deque[dict[str, Any]] = deque(maxlen=25)
         self._latest_signals: dict[str, float] = {}
         self._signals_dirty = False
+        self._last_telemetry_ts = 0.0
         self._target_mouse_x = 0.0
         self._target_mouse_y = 0.0
         self._cur_mouse_x = 0.0
@@ -72,9 +73,21 @@ class AccessRuntime:
         self.engine.set_calibration_offsets(stored.get("calibration") or {})
 
         self.keyboard_assist = KeyboardAssistProvider()
-        self.face_tracker = FaceTrackerProvider(data_dir=self.data_dir)
+        self.face_tracker = FaceTrackerProvider(
+            camera_index=self.settings.camera_index,
+            data_dir=self.data_dir,
+        )
         self.face_tracker.swap_eyes = self.settings.swap_eyes
-        self.audio_trigger = AudioTriggerProvider()
+        self.face_tracker.low_light_mode = self.settings.low_light_camera_mode
+        self.audio_trigger = AudioTriggerProvider(gain=self.settings.mic_gain)
+        self.audio_trigger.device_index = self.settings.mic_device_index
+        self.audio_trigger.apply_config(
+            gain=self.settings.mic_gain,
+            noise_suppression=self.settings.mic_noise_suppression,
+            auto_gain=self.settings.mic_auto_gain,
+            noise_floor=self.settings.mic_noise_floor,
+        )
+        self.audio_trigger.on_noise_calibrated = self._on_mic_noise_calibrated
 
         self.inputs: dict[str, InputProvider] = {
             "face_tracker": self.face_tracker,
@@ -117,13 +130,31 @@ class AccessRuntime:
         self._dispatch_outputs(commands)
 
     def flush_signals(self) -> None:
-        """Broadcast batched latest signal values at ~15 Hz only when changed."""
+        """Broadcast batched latest signal values at ~15 Hz and telemetry every ~0.5s."""
+        now = time.monotonic()
         with self._lock:
-            if not self._signals_dirty:
-                return
+            dirty = self._signals_dirty
             self._signals_dirty = False
-            values = dict(self._latest_signals)
-        self._broadcast_threadsafe({"type": "signals", "values": values})
+            values = dict(self._latest_signals) if dirty else None
+            send_telem = (
+                (self.face_tracker.is_running or self.audio_trigger.is_running)
+                and (now - self._last_telemetry_ts >= 0.5)
+            )
+            if send_telem:
+                self._last_telemetry_ts = now
+
+        if values is not None:
+            self._broadcast_threadsafe({"type": "signals", "values": values})
+        if send_telem:
+            self._broadcast_threadsafe(
+                {
+                    "type": "telemetry",
+                    "telemetry": {
+                        "camera": self.face_tracker.get_telemetry(),
+                        "microphone": self.audio_trigger.get_telemetry(),
+                    },
+                }
+            )
 
     def _reset_mouse_pump_locked(self) -> None:
         self._target_mouse_x = 0.0
@@ -190,18 +221,67 @@ class AccessRuntime:
 
     def update_settings(self, new_settings: AccessibilitySettings) -> dict[str, Any]:
         prev_safe = self.settings.safe_test_mode
+        restart_cam = False
+        restart_mic = False
         with self._lock:
+            cam_changed = (
+                new_settings.camera_index != self.settings.camera_index
+                or new_settings.low_light_camera_mode != self.settings.low_light_camera_mode
+            )
+            mic_changed = new_settings.mic_device_index != self.settings.mic_device_index
             self.settings = new_settings
             self.tts.enabled = new_settings.tts_enabled
             self.face_tracker.swap_eyes = new_settings.swap_eyes
+            self.face_tracker.camera_index = new_settings.camera_index
+            self.face_tracker.low_light_mode = new_settings.low_light_camera_mode
+            self.audio_trigger.device_index = new_settings.mic_device_index
+            self.audio_trigger.apply_config(
+                gain=new_settings.mic_gain,
+                noise_suppression=new_settings.mic_noise_suppression,
+                auto_gain=new_settings.mic_auto_gain,
+                noise_floor=new_settings.mic_noise_floor,
+            )
             if new_settings.safe_test_mode:
                 self._reset_mouse_pump_locked()
+            restart_cam = cam_changed and self.face_tracker.is_running
+            restart_mic = mic_changed and self.audio_trigger.is_running
+
+        if restart_cam:
+            self.face_tracker.stop()
+            self.face_tracker.start(self.handle_signal)
+        if restart_mic:
+            self.audio_trigger.stop()
+            self.audio_trigger.start(self.handle_signal)
+
         self._save_state()
         if prev_safe != new_settings.safe_test_mode:
             self.announce_key("announce.live_off" if new_settings.safe_test_mode else "announce.live_on")
         snapshot = self.get_state_snapshot()
         self._broadcast_threadsafe({"type": "state", "state": snapshot})
         return snapshot
+
+    def list_devices(self) -> dict[str, Any]:
+        return {
+            "cameras": self.face_tracker.list_cameras(),
+            "microphones": self.audio_trigger.list_microphones(),
+        }
+
+    def calibrate_mic_noise(self) -> dict[str, Any]:
+        if self.audio_trigger.is_available() and not self.audio_trigger.is_running:
+            self.audio_trigger.start(self.handle_signal)
+        self.audio_trigger.start_noise_calibration(duration_sec=1.5)
+        self.announce_key("announce.mic_calibrating")
+        snapshot = self.get_state_snapshot()
+        self._broadcast_threadsafe({"type": "state", "state": snapshot})
+        return snapshot
+
+    def _on_mic_noise_calibrated(self, floor: float) -> None:
+        with self._lock:
+            self.settings.mic_noise_floor = round(max(0.0, min(0.5, float(floor))), 4)
+        self._save_state()
+        self.announce_key("announce.mic_calibrated")
+        snapshot = self.get_state_snapshot()
+        self._broadcast_threadsafe({"type": "state", "state": snapshot})
 
     def toggle_input(self, name: str) -> dict[str, Any]:
         provider = self.inputs.get(name)
@@ -323,6 +403,10 @@ class AccessRuntime:
                 "active_toggles": self.engine.get_active_toggles(),
                 "latest_signals": dict(self._latest_signals),
                 "recent_outputs": list(self._recent_outputs),
+                "telemetry": {
+                    "camera": self.face_tracker.get_telemetry(),
+                    "microphone": self.audio_trigger.get_telemetry(),
+                },
             }
 
     def _dispatch_outputs(self, commands: list[OutputCommand], force_real: bool = False) -> None:

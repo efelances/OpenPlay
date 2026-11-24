@@ -111,6 +111,13 @@ class AccessibilitySettings(BaseModel):
     onboarding_done: bool = False
     swap_eyes: bool = False
     safe_test_mode: bool = True  # Always forced True on startup for safety
+    camera_index: int = Field(default=0, ge=0, le=16)
+    low_light_camera_mode: bool = True
+    mic_device_index: int | None = None
+    mic_gain: float = Field(default=4.0, ge=1.0, le=15.0)
+    mic_noise_suppression: bool = True
+    mic_auto_gain: bool = True
+    mic_noise_floor: float = Field(default=0.0, ge=0.0, le=0.5)
 
     @field_validator("language", mode="before")
     @classmethod

@@ -15,6 +15,8 @@ const state = {
   activeTab: "home",
   wizardShown: false,
   wizardStep: 0,
+  devicesLoaded: false,
+  devices: { cameras: [], microphones: [] },
   wizardAnswers: {
     abilities: [],
     support_needs: [],
@@ -130,6 +132,10 @@ const el = {
   btnCalCamToggle: document.getElementById("btn-cal-cam-toggle"),
   cameraStreamImg: document.getElementById("camera-stream-img"),
   cameraPlaceholder: document.getElementById("camera-placeholder"),
+  camTelemetry: document.getElementById("cam-telemetry"),
+  selCamera: document.getElementById("sel-camera"),
+  btnRefreshDevices: document.getElementById("btn-refresh-devices"),
+  chkLowLight: document.getElementById("chk-low-light"),
   reticleDot: document.getElementById("reticle-dot"),
   reticleDeadzone: document.getElementById("reticle-deadzone"),
   btnCalibrate: document.getElementById("btn-calibrate"),
@@ -143,6 +149,14 @@ const el = {
   chkSwapEyes: document.getElementById("chk-swap-eyes"),
   chkInvertX: document.getElementById("chk-invert-x"),
   chkInvertY: document.getElementById("chk-invert-y"),
+  selMic: document.getElementById("sel-mic"),
+  btnCalMicToggle: document.getElementById("btn-cal-mic-toggle"),
+  btnMicNoiseCal: document.getElementById("btn-mic-noise-cal"),
+  slMicGain: document.getElementById("sl-mic-gain"),
+  lblMicGain: document.getElementById("lbl-mic-gain"),
+  chkMicNoise: document.getElementById("chk-mic-noise"),
+  chkMicAgc: document.getElementById("chk-mic-agc"),
+  micTelemetry: document.getElementById("mic-telemetry"),
   btnContrast: document.getElementById("btn-contrast"),
   btnLargeText: document.getElementById("btn-large-text"),
   btnTts: document.getElementById("btn-tts"),
@@ -166,6 +180,9 @@ function switchTab(tabName) {
   document.querySelectorAll(".tab-panel").forEach((p) => {
     p.classList.toggle("hidden", p.id !== `tab-${tabName}`);
   });
+  if (tabName === "calibrate" && !state.devicesLoaded) {
+    refreshDevices().catch(() => {});
+  }
 }
 
 function playTone(freq = 500, durationMs = 60) {
@@ -236,8 +253,10 @@ function applyTranslations() {
   });
 
   el.wsStatus.textContent = state.wsConnected ? t("home.status_ready") : t("home.status_connecting");
+  populateDeviceSelects();
   if (state.data?.active_profile) {
     syncChannelThresholds(state.data.active_profile);
+    renderTelemetry(state.data.telemetry, state.data.inputs || []);
   }
 }
 
@@ -285,8 +304,14 @@ function updateDeviceButtons(inputs) {
 
   const micRunning = !!mic?.running;
   const micAvail = !!mic?.available;
-  el.btnQuickMic.disabled = !micAvail;
-  el.btnQuickMic.textContent = micRunning ? t("home.btn_mic_stop") : t("home.btn_mic_start");
+  [el.btnQuickMic, el.btnCalMicToggle].forEach((btn) => {
+    if (!btn) return;
+    btn.disabled = !micAvail;
+    btn.textContent = micRunning ? t("home.btn_mic_stop") : t("home.btn_mic_start");
+  });
+  if (el.btnMicNoiseCal) {
+    el.btnMicNoiseCal.disabled = !micAvail;
+  }
 
   if (camRunning) {
     if (!el.cameraStreamImg.dataset.active) {
@@ -388,6 +413,15 @@ function renderAll(data) {
   el.btnLargeText.setAttribute("aria-pressed", String(!!s.large_text));
   el.btnTts.setAttribute("aria-pressed", String(!!s.tts_enabled));
   el.chkSwapEyes.checked = !!s.swap_eyes;
+  if (el.chkLowLight) el.chkLowLight.checked = s.low_light_camera_mode !== false;
+  if (el.slMicGain && el.lblMicGain) {
+    const mg = typeof s.mic_gain === "number" ? s.mic_gain : 4.0;
+    el.slMicGain.value = mg;
+    el.lblMicGain.textContent = `${mg.toFixed(1)}x`;
+  }
+  if (el.chkMicNoise) el.chkMicNoise.checked = s.mic_noise_suppression !== false;
+  if (el.chkMicAgc) el.chkMicAgc.checked = s.mic_auto_gain !== false;
+  populateDeviceSelects();
 
   const pid = data.active_profile.id;
   el.activeProfileName.textContent = t(`profile.${pid}.name`);
@@ -475,8 +509,97 @@ function renderAll(data) {
 
   renderVoiceStatus(data);
   updateDeviceButtons(data.inputs);
+  renderTelemetry(data.telemetry, data.inputs);
   renderScanner(data.scanner);
   renderOutputsLog(data.recent_outputs);
+}
+
+function populateDeviceSelects() {
+  const s = state.data?.settings;
+  if (el.selCamera) {
+    const curCam = s?.camera_index ?? 0;
+    const cams = state.devices.cameras.length
+      ? [...state.devices.cameras]
+      : [{ index: curCam, label: t("cal.cam_default_option", { index: curCam }) }];
+    if (!cams.some((c) => c.index === curCam)) {
+      cams.unshift({ index: curCam, label: t("cal.cam_default_option", { index: curCam }) });
+    }
+    el.selCamera.replaceChildren();
+    cams.forEach((c) => {
+      const opt = document.createElement("option");
+      opt.value = String(c.index);
+      opt.textContent = state.devices.cameras.length ? c.label : t("cal.cam_default_option", { index: c.index });
+      el.selCamera.appendChild(opt);
+    });
+    el.selCamera.value = String(curCam);
+  }
+
+  if (el.selMic) {
+    const curMic = s?.mic_device_index;
+    el.selMic.replaceChildren();
+    const defOpt = document.createElement("option");
+    defOpt.value = "";
+    defOpt.textContent = t("cal.mic_default_option");
+    el.selMic.appendChild(defOpt);
+    state.devices.microphones.forEach((m) => {
+      const opt = document.createElement("option");
+      opt.value = String(m.index);
+      opt.textContent = m.name;
+      el.selMic.appendChild(opt);
+    });
+    el.selMic.value = curMic === null || curMic === undefined ? "" : String(curMic);
+  }
+}
+
+async function refreshDevices() {
+  if (el.btnRefreshDevices) el.btnRefreshDevices.disabled = true;
+  try {
+    const res = await apiGet("/api/devices");
+    state.devices = {
+      cameras: Array.isArray(res?.cameras) ? res.cameras : [],
+      microphones: Array.isArray(res?.microphones) ? res.microphones : [],
+    };
+    state.devicesLoaded = true;
+    populateDeviceSelects();
+  } finally {
+    if (el.btnRefreshDevices) el.btnRefreshDevices.disabled = false;
+  }
+}
+
+function renderTelemetry(telemetry, inputs = []) {
+  const camInput = inputs.find((i) => i.name === "face_tracker");
+  const camTel = telemetry?.camera;
+  if (el.camTelemetry) {
+    if (camInput?.running && camTel) {
+      const lightKey = `cal.light.${camTel.light_status || "unknown"}`;
+      const faceText = camTel.face_detected ? t("cal.face_locked") : t("cal.face_missing");
+      let line = t("cal.cam_status_line", {
+        fps: Math.round(camTel.fps || 0),
+        light: t(lightKey),
+        face: faceText,
+      });
+      if (camTel.enhanced) {
+        line += ` · ${t("cal.boost_active")}`;
+      }
+      el.camTelemetry.textContent = line;
+      el.camTelemetry.classList.remove("hidden");
+    } else {
+      el.camTelemetry.classList.add("hidden");
+    }
+  }
+
+  const micTel = telemetry?.microphone;
+  if (el.micTelemetry && micTel) {
+    if (micTel.calibrating_noise) {
+      el.micTelemetry.textContent = t("cal.mic_calibrating");
+    } else {
+      el.micTelemetry.textContent = t("cal.mic_status_line", {
+        sr: micTel.samplerate || 16000,
+        floor: Math.round((micTel.noise_floor || 0) * 100),
+        gain: (micTel.effective_gain || 4).toFixed(1),
+      });
+    }
+  }
 }
 
 /* System Diagnostics */
@@ -664,9 +787,62 @@ function bindEvents() {
     });
   });
 
-  el.btnQuickMic.addEventListener("click", async () => {
-    renderAll(await apiPost("/api/inputs/audio_trigger/toggle"));
+  [el.btnQuickMic, el.btnCalMicToggle].forEach((btn) => {
+    if (!btn) return;
+    btn.addEventListener("click", async () => {
+      renderAll(await apiPost("/api/inputs/audio_trigger/toggle"));
+    });
   });
+
+  if (el.btnRefreshDevices) {
+    el.btnRefreshDevices.addEventListener("click", () => {
+      refreshDevices().catch(() => {});
+    });
+  }
+  if (el.selCamera) {
+    el.selCamera.addEventListener("change", async (e) => {
+      const idx = parseInt(e.target.value, 10) || 0;
+      renderAll(await apiPost("/api/settings", { ...state.data.settings, camera_index: idx }));
+    });
+  }
+  if (el.chkLowLight) {
+    el.chkLowLight.addEventListener("change", async (e) => {
+      renderAll(await apiPost("/api/settings", { ...state.data.settings, low_light_camera_mode: e.target.checked }));
+    });
+  }
+  if (el.selMic) {
+    el.selMic.addEventListener("change", async (e) => {
+      const val = e.target.value === "" ? null : parseInt(e.target.value, 10);
+      renderAll(await apiPost("/api/settings", { ...state.data.settings, mic_device_index: val }));
+    });
+  }
+  if (el.btnMicNoiseCal) {
+    el.btnMicNoiseCal.addEventListener("click", async () => {
+      playTone(520, 60);
+      renderAll(await apiPost("/api/audio/calibrate-noise"));
+    });
+  }
+  if (el.slMicGain) {
+    el.slMicGain.addEventListener("input", (e) => {
+      if (el.lblMicGain) {
+        el.lblMicGain.textContent = `${parseFloat(e.target.value).toFixed(1)}x`;
+      }
+    });
+    el.slMicGain.addEventListener("change", async (e) => {
+      const mg = parseFloat(e.target.value);
+      renderAll(await apiPost("/api/settings", { ...state.data.settings, mic_gain: mg }));
+    });
+  }
+  if (el.chkMicNoise) {
+    el.chkMicNoise.addEventListener("change", async (e) => {
+      renderAll(await apiPost("/api/settings", { ...state.data.settings, mic_noise_suppression: e.target.checked }));
+    });
+  }
+  if (el.chkMicAgc) {
+    el.chkMicAgc.addEventListener("change", async (e) => {
+      renderAll(await apiPost("/api/settings", { ...state.data.settings, mic_auto_gain: e.target.checked }));
+    });
+  }
 
   el.btnCalibrate.addEventListener("click", async () => {
     playTone(540, 80);
@@ -785,6 +961,9 @@ function connectWS() {
       }
     } else if (msg.type === "signals") {
       Object.entries(msg.values || {}).forEach(([ch, val]) => updateSignalVisuals(ch, val));
+    } else if (msg.type === "telemetry" && state.data) {
+      state.data.telemetry = msg.telemetry;
+      renderTelemetry(msg.telemetry, state.data.inputs || []);
     } else if (msg.type === "announcement") {
       announce(msg.text, false);
     } else if (msg.type === "scanner") {

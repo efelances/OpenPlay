@@ -85,6 +85,17 @@
             <div id="camera-placeholder" class="camera-placeholder"></div>
           </div>
 
+          <div id="cam-telemetry" class="telemetry-strip hidden"></div>
+
+          <div class="hw-row">
+            <select id="sel-camera" class="hw-select" data-i18n-aria="cal.cam_device_aria" aria-label="Camera device"></select>
+            <button id="btn-refresh-devices" type="button" data-i18n="cal.btn_refresh_devices">Refresh Devices</button>
+            <label class="checkbox-label">
+              <input id="chk-low-light" type="checkbox" checked />
+              <span data-i18n="cal.low_light_mode">Low-light boost</span>
+            </label>
+          </div>
+
           <div class="row-gap">
             <button id="btn-calibrate" class="btn-primary" data-i18n="cal.btn_center">Look Straight → Set Center</button>
             <button id="btn-calibrate-reset" data-i18n="cal.btn_reset">Reset</button>
@@ -188,6 +199,30 @@
                 <input id="chk-invert-y" type="checkbox" />
                 <span data-i18n="cal.invert_y">Invert Y axis</span>
               </label>
+            </div>
+
+            <div class="hw-section">
+              <h3 data-i18n="cal.mic_section_title" style="margin: 0 0 0.45rem;">Microphone Enhancement</h3>
+              <div class="hw-row">
+                <select id="sel-mic" class="hw-select" data-i18n-aria="cal.mic_device_aria" aria-label="Microphone device"></select>
+                <button id="btn-cal-mic-toggle" type="button" data-i18n="home.btn_mic_start">Start Microphone</button>
+                <button id="btn-mic-noise-cal" type="button" data-i18n="cal.btn_mic_cal_noise">Measure Room Noise (1.5s)</button>
+              </div>
+              <div class="slider-row" style="margin-top: 0.55rem;">
+                <label for="sl-mic-gain"><span data-i18n="cal.lbl_mic_gain">Microphone Gain</span><span id="lbl-mic-gain">4.0x</span></label>
+                <input id="sl-mic-gain" type="range" min="1.0" max="15.0" step="0.5" value="4.0" />
+              </div>
+              <div class="checkbox-row">
+                <label class="checkbox-label">
+                  <input id="chk-mic-noise" type="checkbox" checked />
+                  <span data-i18n="cal.mic_noise_filter">Noise &amp; hum filter</span>
+                </label>
+                <label class="checkbox-label">
+                  <input id="chk-mic-agc" type="checkbox" checked />
+                  <span data-i18n="cal.mic_auto_gain">Auto boost (AGC)</span>
+                </label>
+              </div>
+              <p id="mic-telemetry" class="hint" style="margin: 0.35rem 0 0;"></p>
             </div>
           </div>
         </div>

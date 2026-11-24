@@ -103,14 +103,15 @@ def run_diagnostics(runtime: "AccessRuntime") -> list[dict[str, str]]:
         try:
             import cv2  # type: ignore
 
+            cam_idx = getattr(runtime.settings, "camera_index", 0)
             if sys.platform == "win32" and hasattr(cv2, "CAP_DSHOW"):
-                cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+                cap = cv2.VideoCapture(cam_idx, cv2.CAP_DSHOW)
             else:
-                cap = cv2.VideoCapture(0)
+                cap = cv2.VideoCapture(cam_idx)
             opened = bool(cap.isOpened())
             cap.release()
             if opened:
-                results.append(_item("camera", "ok", "Device 0 ready"))
+                results.append(_item("camera", "ok", f"Device {cam_idx} ready"))
             else:
                 results.append(_item("camera", "warn", "No webcam detected or camera busy"))
         except Exception as exc:
