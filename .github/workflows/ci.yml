@@ -23,4 +23,4 @@ jobs:
       - name: Fetch face model
         run: python scripts/fetch_models.py
       - name: Run tests
-        run: pytest -q
+        run: python -m pytest -q
