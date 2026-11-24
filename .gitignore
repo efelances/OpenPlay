@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+build/
+dist/
+release/
+openplay/models/*.task
+*.log
+.vscode/
+.idea/

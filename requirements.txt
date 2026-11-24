@@ -1,0 +1,12 @@
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.9.0
+pywebview>=5.3
+pywin32>=306; sys_platform == "win32"
+opencv-python>=4.10.0
+mediapipe>=0.10.14
+sounddevice>=0.5.0
+numpy>=1.26.0
+
+# Optional: Virtual Xbox 360 controller support (requires ViGEmBus driver)
+# vgamepad>=0.1.0

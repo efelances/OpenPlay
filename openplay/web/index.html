@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title data-i18n="app.title">OpenPlay Access</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div id="sr-live" class="sr-only" aria-live="assertive" aria-atomic="true"></div>
+
+  <header class="top-bar" role="banner">
+    <h1 class="brand-title" data-i18n="app.title">OpenPlay Access</h1>
+
+    <nav class="tabs" role="tablist" aria-label="Main tabs">
+      <button class="tab-btn" role="tab" data-tab="home" data-i18n="tab.home" aria-selected="true">Home</button>
+      <button class="tab-btn" role="tab" data-tab="calibrate" data-i18n="tab.calibrate" aria-selected="false">Calibration &amp; Test</button>
+      <button class="tab-btn" role="tab" data-tab="settings" data-i18n="tab.settings" aria-selected="false">Profiles &amp; Settings</button>
+    </nav>
+
+    <div class="top-actions">
+      <select id="lang-select" class="lang-select" aria-label="Language">
+        <option value="en">EN</option>
+        <option value="tr">TR</option>
+        <option value="de">DE</option>
+        <option value="es">ES</option>
+      </select>
+      <button id="btn-open-wizard" data-i18n="btn.wizard">Setup Wizard</button>
+      <button id="btn-emergency" data-i18n="btn.emergency" data-i18n-title="btn.emergency_title" title="Shortcut: F12">Emergency Stop (F12)</button>
+    </div>
+  </header>
+
+  <main class="container" role="main">
+    <!-- TAB 1: HOME -->
+    <section id="tab-home" class="tab-panel">
+      <div class="card hero-card">
+        <div class="row-between">
+          <div>
+            <div class="profile-label" data-i18n="home.active_profile">Active Profile</div>
+            <h2 id="active-profile-name" class="hero-title">...</h2>
+            <p id="active-profile-desc" class="hint" style="margin-bottom: 0;"></p>
+          </div>
+          <span id="ws-status" class="badge" data-i18n="home.status_connecting">Connecting...</span>
+        </div>
+
+        <div class="row-gap">
+          <button id="btn-mode" class="btn-primary btn-large" data-i18n="home.btn_start_live">Start Live Game Mode</button>
+          <button id="btn-quick-cam" class="btn-large" data-i18n="home.btn_cam_start">Start Camera</button>
+          <button id="btn-quick-mic" class="btn-large" data-i18n="home.btn_mic_start">Start Microphone</button>
+          <button id="btn-goto-calibrate" class="btn-large" data-i18n="home.btn_goto_cal">Calibrate</button>
+        </div>
+        <p id="mode-hint" class="hint" style="margin: 0;"></p>
+      </div>
+
+      <!-- Single-Switch Scanning -->
+      <div id="scanner-section" class="card hidden" style="margin-top: 1.25rem;">
+        <div class="row-between" style="margin-bottom: 0.75rem;">
+          <h2 data-i18n="home.scanner_title">Single-Switch Scanning</h2>
+          <span class="badge" data-i18n="home.scanner_badge">Trigger with Space</span>
+        </div>
+        <div id="scanner-tiles" class="scanner-tiles" role="list"></div>
+        <button id="btn-big-switch" class="btn-primary btn-large" style="width: 100%;" data-i18n="home.scanner_big_btn">TRIGGER SINGLE SWITCH (SPACE)</button>
+      </div>
+
+      <!-- Active Controls Cheat-Sheet -->
+      <div class="card" style="margin-top: 1.25rem;">
+        <h2 data-i18n="home.controls_title">Active Controls</h2>
+        <p class="hint" data-i18n="home.controls_hint">See which movement triggers each game action below.</p>
+        <div id="home-controls-grid" class="controls-grid"></div>
+      </div>
+    </section>
+
+    <!-- TAB 2: CALIBRATION & TEST -->
+    <section id="tab-calibrate" class="tab-panel hidden">
+      <div class="two-col">
+        <!-- Left: Camera & Center Reticle -->
+        <div class="card">
+          <div class="row-between" style="margin-bottom: 0.65rem;">
+            <h2 data-i18n="cal.cam_title">1. Camera &amp; Center Calibration</h2>
+            <button id="btn-cal-cam-toggle" data-i18n="home.btn_cam_start">Start Camera</button>
+          </div>
+
+          <div class="camera-box">
+            <img id="camera-stream-img" class="hidden" data-i18n-alt="cal.cam_alt" alt="Live webcam preview" />
+            <div id="camera-placeholder" class="camera-placeholder"></div>
+          </div>
+
+          <div class="row-gap">
+            <button id="btn-calibrate" class="btn-primary" data-i18n="cal.btn_center">Look Straight → Set Center</button>
+            <button id="btn-calibrate-reset" data-i18n="cal.btn_reset">Reset</button>
+          </div>
+
+          <div class="reticle-wrap">
+            <div class="reticle-box" data-i18n-aria="cal.reticle_aria" aria-label="Live direction indicator">
+              <div class="reticle-cross-h"></div>
+              <div class="reticle-cross-v"></div>
+              <div id="reticle-deadzone" class="reticle-deadzone"></div>
+              <div id="reticle-dot" class="reticle-dot"></div>
+            </div>
+            <div>
+              <h3 data-i18n="cal.reticle_title">Live Direction Indicator</h3>
+              <p class="hint" style="margin: 0;" data-i18n="cal.reticle_hint"></p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Live Meters & Tuning -->
+        <div class="card">
+          <h2 data-i18n="cal.meters_title">2. Live Levels &amp; Sensitivity</h2>
+          <p class="hint" data-i18n="cal.meters_hint"></p>
+
+          <div class="meter-list">
+            <div class="meter-row">
+              <div class="meter-head">
+                <span data-i18n="cal.meter.wink_left">Left Eye Wink</span>
+                <span class="meter-head-values"><span id="val-wink_left">0%</span><span id="th-wink_left" class="meter-th-badge"></span></span>
+              </div>
+              <div class="meter-track"><div id="bar-wink_left" class="meter-fill"></div><input type="range" class="meter-slider" id="sl-th-wink_left" data-channel="wink_left" min="0.15" max="0.95" step="0.05" value="0.45" /></div>
+            </div>
+            <div class="meter-row">
+              <div class="meter-head">
+                <span data-i18n="cal.meter.wink_right">Right Eye Wink</span>
+                <span class="meter-head-values"><span id="val-wink_right">0%</span><span id="th-wink_right" class="meter-th-badge"></span></span>
+              </div>
+              <div class="meter-track"><div id="bar-wink_right" class="meter-fill"></div><input type="range" class="meter-slider" id="sl-th-wink_right" data-channel="wink_right" min="0.15" max="0.95" step="0.05" value="0.45" /></div>
+            </div>
+            <div class="meter-row">
+              <div class="meter-head">
+                <span data-i18n="cal.meter.mouth_open">Mouth Open</span>
+                <span class="meter-head-values"><span id="val-mouth_open">0%</span><span id="th-mouth_open" class="meter-th-badge"></span></span>
+              </div>
+              <div class="meter-track"><div id="bar-mouth_open" class="meter-fill"></div><input type="range" class="meter-slider" id="sl-th-mouth_open" data-channel="mouth_open" min="0.15" max="0.95" step="0.05" value="0.50" /></div>
+            </div>
+            <div class="meter-row">
+              <div class="meter-head">
+                <span data-i18n="cal.meter.mouth_pucker">Lip Pucker</span>
+                <span class="meter-head-values"><span id="val-mouth_pucker">0%</span><span id="th-mouth_pucker" class="meter-th-badge"></span></span>
+              </div>
+              <div class="meter-track"><div id="bar-mouth_pucker" class="meter-fill"></div><input type="range" class="meter-slider" id="sl-th-mouth_pucker" data-channel="mouth_pucker" min="0.15" max="0.95" step="0.05" value="0.55" /></div>
+            </div>
+            <div class="meter-row">
+              <div class="meter-head">
+                <span data-i18n="cal.meter.cheek_puff">Cheek Puff</span>
+                <span class="meter-head-values"><span id="val-cheek_puff">0%</span><span id="th-cheek_puff" class="meter-th-badge"></span></span>
+              </div>
+              <div class="meter-track"><div id="bar-cheek_puff" class="meter-fill"></div><input type="range" class="meter-slider" id="sl-th-cheek_puff" data-channel="cheek_puff" min="0.15" max="0.95" step="0.05" value="0.55" /></div>
+            </div>
+            <div class="meter-row">
+              <div class="meter-head">
+                <span data-i18n="cal.meter.eyebrow_raise">Eyebrow Raise</span>
+                <span class="meter-head-values"><span id="val-eyebrow_raise">0%</span><span id="th-eyebrow_raise" class="meter-th-badge"></span></span>
+              </div>
+              <div class="meter-track"><div id="bar-eyebrow_raise" class="meter-fill"></div><input type="range" class="meter-slider" id="sl-th-eyebrow_raise" data-channel="eyebrow_raise" min="0.15" max="0.95" step="0.05" value="0.60" /></div>
+            </div>
+            <div class="meter-row">
+              <div class="meter-head">
+                <span data-i18n="cal.meter.audio_level">Microphone Level</span>
+                <span class="meter-head-values"><span id="val-audio_level">0%</span><span id="th-audio_level" class="meter-th-badge"></span></span>
+              </div>
+              <div class="meter-track"><div id="bar-audio_level" class="meter-fill"></div><input type="range" class="meter-slider" id="sl-th-audio_level" data-channel="audio_level" min="0.15" max="0.95" step="0.05" value="0.45" /></div>
+            </div>
+          </div>
+
+          <div class="slider-group">
+            <div class="slider-row">
+              <label for="sl-sensitivity"><span data-i18n="cal.lbl_sensitivity">Camera Sensitivity</span><span id="lbl-sensitivity">1.5x</span></label>
+              <input id="sl-sensitivity" type="range" min="0.4" max="3.0" step="0.1" value="1.5" />
+            </div>
+            <div class="slider-row">
+              <label for="sl-deadzone"><span data-i18n="cal.lbl_deadzone">Deadzone</span><span id="lbl-deadzone">14%</span></label>
+              <input id="sl-deadzone" type="range" min="0.05" max="0.40" step="0.02" value="0.14" />
+            </div>
+            <div class="slider-row">
+              <label for="sl-smoothing"><span data-i18n="cal.lbl_smoothing">Mouse Smoothing</span><span id="lbl-smoothing">35%</span></label>
+              <input id="sl-smoothing" type="range" min="0.10" max="0.85" step="0.05" value="0.35" />
+            </div>
+
+            <div class="checkbox-row">
+              <label class="checkbox-label">
+                <input id="chk-swap-eyes" type="checkbox" />
+                <span data-i18n="cal.swap_eyes">Swap left &amp; right eyes</span>
+              </label>
+              <label class="checkbox-label">
+                <input id="chk-invert-x" type="checkbox" />
+                <span data-i18n="cal.invert_x">Invert X axis</span>
+              </label>
+              <label class="checkbox-label">
+                <input id="chk-invert-y" type="checkbox" />
+                <span data-i18n="cal.invert_y">Invert Y axis</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Manual Test & Output Log -->
+      <div class="card" style="margin-top: 1.25rem;">
+        <h2 data-i18n="cal.test_title">3. Quick Test &amp; Live Output</h2>
+        <div class="row-gap" style="margin-bottom: 0.9rem;">
+          <button class="sim-btn" data-channel="wink_left" data-source="face_tracker" data-i18n="cal.test_wink_left">Test Left Wink</button>
+          <button class="sim-btn" data-channel="wink_right" data-source="face_tracker" data-i18n="cal.test_wink_right">Test Right Wink</button>
+          <button class="sim-btn" data-channel="mouth_open" data-source="face_tracker" data-i18n="cal.test_mouth_open">Test Mouth Open</button>
+          <button class="sim-btn" data-channel="mouth_pucker" data-source="face_tracker" data-i18n="cal.test_mouth_pucker">Test Lip Pucker</button>
+          <button class="sim-btn" data-channel="cheek_puff" data-source="face_tracker" data-i18n="cal.test_cheek_puff">Test Cheek Puff</button>
+          <button class="sim-btn" data-channel="eyebrow_raise" data-source="face_tracker" data-i18n="cal.test_eyebrow">Test Eyebrow Raise</button>
+          <button class="sim-btn" data-channel="audio_trigger" data-source="audio_trigger" data-i18n="cal.test_audio">Test Breath / Sound</button>
+        </div>
+        <ul id="output-log" class="clean-list" aria-live="polite"></ul>
+      </div>
+    </section>
+
+    <!-- TAB 3: PROFILES & SETTINGS -->
+    <section id="tab-settings" class="tab-panel hidden">
+      <div class="two-col">
+        <div class="card">
+          <h2 data-i18n="set.lang_voice_title">Language &amp; Voice</h2>
+          <div class="row-gap" style="margin-top: 0.5rem;">
+            <label for="set-lang-select" data-i18n="set.lang_label" style="font-weight: 600;">Interface &amp; Speech Language</label>
+            <select id="set-lang-select" class="lang-select">
+              <option value="en">English</option>
+              <option value="tr">Türkçe</option>
+              <option value="de">Deutsch</option>
+              <option value="es">Español</option>
+            </select>
+          </div>
+          <p id="voice-status-msg" class="voice-note"></p>
+        </div>
+
+        <div class="card">
+          <h2 data-i18n="set.appearance_title">Appearance &amp; Accessibility</h2>
+          <div class="row-gap" style="margin-top: 0.5rem;">
+            <button id="btn-contrast" class="toggle-btn" aria-pressed="false" data-i18n="set.btn_contrast">High Contrast</button>
+            <button id="btn-large-text" class="toggle-btn" aria-pressed="false" data-i18n="set.btn_large_text">Large Text</button>
+            <button id="btn-tts" class="toggle-btn" aria-pressed="true" data-i18n="set.btn_tts">Voice Guidance (TTS)</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 1.25rem;">
+        <h2 data-i18n="set.profiles_title">All Profiles</h2>
+        <p class="hint" data-i18n="set.profiles_hint">Click any profile to activate it immediately.</p>
+        <div id="profiles-grid" class="profiles-grid" role="list"></div>
+      </div>
+
+      <div class="card" style="margin-top: 1.25rem;">
+        <div class="row-between" style="margin-bottom: 0.5rem;">
+          <div>
+            <h2 data-i18n="set.diag_title">System Check</h2>
+            <p class="hint" style="margin: 0;" data-i18n="set.diag_hint"></p>
+          </div>
+          <button id="btn-run-diag" class="btn-primary" data-i18n="set.diag_btn_run">Run System Check</button>
+        </div>
+        <div id="diag-list" class="module-list"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Setup Wizard Modal -->
+  <div id="wizard-backdrop" class="wizard-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
+    <div class="wizard-dialog">
+      <div class="row-between">
+        <div>
+          <div id="wizard-step-tag" class="wizard-step-tag"></div>
+          <h2 id="wizard-title" style="margin: 0.2rem 0 0;"></h2>
+        </div>
+        <button id="btn-wizard-close" data-i18n="wizard.close">Close</button>
+      </div>
+      <p id="wizard-question" class="hint" style="margin: 0;"></p>
+      <div id="wizard-body"></div>
+      <div class="wizard-footer">
+        <button id="btn-wizard-prev" data-i18n="wizard.prev">Back</button>
+        <button id="btn-wizard-next" class="btn-primary"></button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
