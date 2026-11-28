@@ -14,6 +14,7 @@ from openplay.core.models import (
 )
 
 _ALLOWED_OVERRIDE_FIELDS = {"sensitivity", "deadzone", "threshold", "invert", "smoothing"}
+_ALLOWED_SWITCH_SCAN_FIELDS = {"face_threshold", "audio_threshold", "interval_ms"}
 
 
 def create_builtin_profiles() -> list[Profile]:
@@ -477,6 +478,11 @@ class ProfileManager:
                     for field, val in rule_ov.items():
                         if field in _ALLOWED_OVERRIDE_FIELDS:
                             setattr(rule, field, val)
+            scan_ov = prof_overrides.get("__switch_scan__")
+            if scan_ov:
+                for field, val in scan_ov.items():
+                    if field in _ALLOWED_SWITCH_SCAN_FIELDS:
+                        setattr(profile.switch_scan, field, val)
             self._profiles[profile.id] = profile
 
     def list_profiles(self) -> list[Profile]:
@@ -500,6 +506,19 @@ class ProfileManager:
                     for k, v in filtered.items():
                         setattr(rule, k, v)
                     break
+
+    def set_switch_scan_override(self, profile_id: str, **fields: Any) -> None:
+        filtered = {k: v for k, v in fields.items() if k in _ALLOWED_SWITCH_SCAN_FIELDS and v is not None}
+        if not filtered:
+            return
+        prof_ov = self._overrides.setdefault(profile_id, {})
+        scan_ov = prof_ov.setdefault("__switch_scan__", {})
+        scan_ov.update(filtered)
+
+        profile = self._profiles.get(profile_id)
+        if profile:
+            for k, v in filtered.items():
+                setattr(profile.switch_scan, k, v)
 
     def get_overrides(self) -> dict[str, dict[str, dict[str, Any]]]:
         return {

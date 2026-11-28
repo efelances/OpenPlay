@@ -43,10 +43,10 @@ def test_left_wink_and_swap_eyes():
     assert swapped["wink_left"] == 0.0
 
 
-def test_switch_face_emitted_only_on_strong_mouth_open():
+def test_switch_face_tracks_continuous_mouth_open():
     lm = _dummy_landmarks()
-    assert compute_signals(lm, {"jawOpen": 0.2})["switch_face"] == 0.0
-    assert compute_signals(lm, {"jawOpen": 0.8})["switch_face"] == 1.0
+    assert compute_signals(lm, {"jawOpen": 0.2})["switch_face"] == 0.2
+    assert compute_signals(lm, {"jawOpen": 0.8})["switch_face"] == 0.8
     assert "switch_1" not in compute_signals(lm, {"jawOpen": 0.8})
 
 

@@ -201,4 +201,4 @@ class AudioTriggerProvider(InputProvider):
         self.emit("audio_level", level, now)
         self.emit("audio_trigger", level, now)
         self.emit("audio_loud", level, now)
-        self.emit("switch_audio", 1.0 if level >= 0.55 else 0.0, now)
+        self.emit("switch_audio", level, now)

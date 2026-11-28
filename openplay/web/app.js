@@ -5,6 +5,20 @@ const LANG_NAMES = {
   es: "Español",
 };
 
+const ASSIST_SHORTCUTS = {
+  assist_toggle_walk: "F6",
+  assist_toggle_sprint: "F7",
+  assist_macro_1: "F8",
+};
+
+const SHORTCUT_TO_CHANNEL = {
+  F6: "assist_toggle_walk",
+  F7: "assist_toggle_sprint",
+  F8: "assist_macro_1",
+};
+
+const BLANK_IMG_DATA = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+
 const state = {
   data: null,
   dict: {},
@@ -13,6 +27,7 @@ const state = {
   wsConnected: false,
   audioCtx: null,
   activeTab: "home",
+  camReconnectTimer: null,
   wizardShown: false,
   wizardStep: 0,
   devicesLoaded: false,
@@ -121,6 +136,8 @@ const el = {
   scannerSection: document.getElementById("scanner-section"),
   scannerTiles: document.getElementById("scanner-tiles"),
   btnBigSwitch: document.getElementById("btn-big-switch"),
+  assistSection: document.getElementById("assist-section"),
+  assistButtons: document.getElementById("assist-buttons"),
   profilesGrid: document.getElementById("profiles-grid"),
   diagList: document.getElementById("diag-list"),
   btnRunDiag: document.getElementById("btn-run-diag"),
@@ -182,6 +199,9 @@ function switchTab(tabName) {
   });
   if (tabName === "calibrate" && !state.devicesLoaded) {
     refreshDevices().catch(() => {});
+  }
+  if (state.data?.inputs) {
+    updateDeviceButtons(state.data.inputs);
   }
 }
 
@@ -291,6 +311,19 @@ function updateSignalVisuals(channel, value) {
   }
 }
 
+function stopCameraPreview() {
+  if (state.camReconnectTimer) {
+    clearTimeout(state.camReconnectTimer);
+    state.camReconnectTimer = null;
+  }
+  if (el.cameraStreamImg.dataset.streamId || el.cameraStreamImg.getAttribute("src")) {
+    el.cameraStreamImg.src = BLANK_IMG_DATA;
+    el.cameraStreamImg.removeAttribute("src");
+  }
+  delete el.cameraStreamImg.dataset.streamId;
+  el.cameraStreamImg.classList.add("hidden");
+}
+
 function updateDeviceButtons(inputs) {
   const cam = inputs.find((i) => i.name === "face_tracker");
   const mic = inputs.find((i) => i.name === "audio_trigger");
@@ -313,17 +346,21 @@ function updateDeviceButtons(inputs) {
     el.btnMicNoiseCal.disabled = !micAvail;
   }
 
-  if (camRunning) {
-    if (!el.cameraStreamImg.dataset.active) {
-      el.cameraStreamImg.src = `/api/camera/stream?t=${Date.now()}`;
-      el.cameraStreamImg.dataset.active = "1";
+  const shouldStream = camRunning && state.activeTab === "calibrate";
+  if (shouldStream) {
+    const sid = String(cam?.stream_id ?? 0);
+    if (el.cameraStreamImg.dataset.streamId !== sid || !el.cameraStreamImg.getAttribute("src")) {
+      if (state.camReconnectTimer) {
+        clearTimeout(state.camReconnectTimer);
+        state.camReconnectTimer = null;
+      }
+      el.cameraStreamImg.dataset.streamId = sid;
+      el.cameraStreamImg.src = `/api/camera/stream?sid=${encodeURIComponent(sid)}&t=${Date.now()}`;
     }
     el.cameraStreamImg.classList.remove("hidden");
     el.cameraPlaceholder.classList.add("hidden");
   } else {
-    el.cameraStreamImg.removeAttribute("src");
-    delete el.cameraStreamImg.dataset.active;
-    el.cameraStreamImg.classList.add("hidden");
+    stopCameraPreview();
     el.cameraPlaceholder.classList.remove("hidden");
     if (!camAvail) {
       el.cameraPlaceholder.textContent = t("cal.cam_placeholder_missing");
@@ -382,6 +419,7 @@ function renderVoiceStatus(data) {
 
 function syncChannelThresholds(profile) {
   const rules = profile?.rules || [];
+  const scan = profile?.switch_scan;
   document.querySelectorAll(".meter-slider").forEach((sl) => {
     const ch = sl.dataset.channel;
     const match = rules.find((r) => {
@@ -391,7 +429,16 @@ function syncChannelThresholds(profile) {
       }
       return r.channel === ch;
     });
-    const th = match ? match.threshold : state.channelThresholds[ch] ?? 0.5;
+    let th;
+    if (match) {
+      th = match.threshold;
+    } else if (scan?.enabled && ch === "mouth_open") {
+      th = scan.face_threshold ?? 0.65;
+    } else if (scan?.enabled && ch === "audio_level") {
+      th = scan.audio_threshold ?? 0.55;
+    } else {
+      th = state.channelThresholds[ch] ?? 0.5;
+    }
     state.channelThresholds[ch] = th;
     sl.value = th;
     const nameText = t(`cal.meter.${ch}`);
@@ -401,6 +448,92 @@ function syncChannelThresholds(profile) {
       badge.textContent = t("cal.threshold_short", { pct: Math.round(th * 100) });
     }
   });
+}
+
+function renderAssistControls(data) {
+  if (!el.assistSection || !el.assistButtons) return;
+  const assistRules = (data?.active_profile?.rules || []).filter(
+    (r) => r.enabled && r.source === "keyboard_assist"
+  );
+  if (assistRules.length === 0) {
+    el.assistSection.classList.add("hidden");
+    el.assistButtons.replaceChildren();
+    return;
+  }
+  el.assistSection.classList.remove("hidden");
+  el.assistButtons.replaceChildren();
+  assistRules.forEach((r) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "assist-btn btn-large";
+    const isToggle = r.mode === "toggle";
+    const isOn = !!(data.active_toggles && data.active_toggles[r.id]);
+    if (isToggle) {
+      btn.setAttribute("aria-pressed", String(isOn));
+    }
+
+    const titleRow = document.createElement("span");
+    titleRow.className = "assist-btn-title";
+    const titleText = document.createElement("span");
+    titleText.textContent = t(`rule.${r.id}`);
+    titleRow.appendChild(titleText);
+
+    const shortcut = ASSIST_SHORTCUTS[r.channel];
+    if (shortcut) {
+      const badge = document.createElement("span");
+      badge.className = "assist-shortcut";
+      badge.textContent = shortcut;
+      titleRow.appendChild(badge);
+    }
+
+    const metaRow = document.createElement("span");
+    metaRow.className = "assist-btn-meta";
+    const keyLabel =
+      r.mode === "macro" && Array.isArray(r.macro_targets) && r.macro_targets.length
+        ? r.macro_targets.map((k) => k.toUpperCase()).join(" + ")
+        : r.target.toUpperCase();
+    if (isToggle) {
+      const stateText = isOn ? t("home.control_on_suffix") : t("home.control_off_suffix");
+      metaRow.textContent = `${keyLabel} · ${stateText}`;
+    } else {
+      metaRow.textContent = keyLabel;
+    }
+
+    btn.append(titleRow, metaRow);
+    btn.addEventListener("click", () => {
+      triggerPulse(r.channel, "keyboard_assist");
+    });
+    el.assistButtons.appendChild(btn);
+  });
+}
+
+function renderHomeControls(data) {
+  el.homeControlsGrid.replaceChildren();
+  if (data.active_profile.rules.length === 0) {
+    const chip = document.createElement("div");
+    chip.className = "control-chip";
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = t("home.scanner_title");
+    const keySpan = document.createElement("span");
+    keySpan.className = "control-key";
+    keySpan.textContent = "SPACE";
+    chip.append(nameSpan, keySpan);
+    el.homeControlsGrid.appendChild(chip);
+  } else {
+    data.active_profile.rules.forEach((r) => {
+      const chip = document.createElement("div");
+      chip.className = "control-chip";
+      const on = data.active_toggles?.[r.id] ? ` (${t("home.control_on_suffix")})` : "";
+      const keySpan = document.createElement("span");
+      keySpan.className = "control-key";
+      const shortcut = r.source === "keyboard_assist" ? ASSIST_SHORTCUTS[r.channel] : "";
+      keySpan.textContent = shortcut ? `${shortcut} · ${r.target.toUpperCase()}` : r.target.toUpperCase();
+      const nameSpan = document.createElement("span");
+      nameSpan.textContent = `${t(`rule.${r.id}`)}${on}`;
+      chip.append(nameSpan, keySpan);
+      el.homeControlsGrid.appendChild(chip);
+    });
+  }
 }
 
 function renderAll(data) {
@@ -459,32 +592,8 @@ function renderAll(data) {
 
   syncChannelThresholds(data.active_profile);
 
-  // Active controls cheat-sheet (safe DOM construction)
-  el.homeControlsGrid.replaceChildren();
-  if (data.active_profile.rules.length === 0) {
-    const chip = document.createElement("div");
-    chip.className = "control-chip";
-    const nameSpan = document.createElement("span");
-    nameSpan.textContent = t("home.scanner_title");
-    const keySpan = document.createElement("span");
-    keySpan.className = "control-key";
-    keySpan.textContent = "SPACE";
-    chip.append(nameSpan, keySpan);
-    el.homeControlsGrid.appendChild(chip);
-  } else {
-    data.active_profile.rules.forEach((r) => {
-      const chip = document.createElement("div");
-      chip.className = "control-chip";
-      const on = data.active_toggles?.[r.id] ? ` (${t("home.control_on_suffix")})` : "";
-      const keySpan = document.createElement("span");
-      keySpan.className = "control-key";
-      keySpan.textContent = r.target.toUpperCase();
-      const nameSpan = document.createElement("span");
-      nameSpan.textContent = `${t(`rule.${r.id}`)}${on}`;
-      chip.append(nameSpan, keySpan);
-      el.homeControlsGrid.appendChild(chip);
-    });
-  }
+  renderAssistControls(data);
+  renderHomeControls(data);
 
   // Profiles Grid (safe DOM construction)
   el.profilesGrid.replaceChildren();
@@ -733,7 +842,7 @@ function renderWizardStep(shouldSpeak = true) {
 
 async function triggerPulse(channel, source) {
   playTone(680, 45);
-  updateSignalVisuals(channel, 0.9);
+  updateSignalVisuals(channel, 1.0);
   await apiPost("/api/simulate", { channel, value: 1.0, source });
   setTimeout(() => {
     updateSignalVisuals(channel, 0.0);
@@ -920,11 +1029,41 @@ function bindEvents() {
     btn.addEventListener("click", () => triggerPulse(btn.dataset.channel, btn.dataset.source));
   });
 
+  if (el.cameraStreamImg) {
+    el.cameraStreamImg.addEventListener("error", () => {
+      const cam = state.data?.inputs?.find((i) => i.name === "face_tracker");
+      if (cam?.running && state.activeTab === "calibrate" && !state.camReconnectTimer) {
+        state.camReconnectTimer = setTimeout(() => {
+          state.camReconnectTimer = null;
+          const latestCam = state.data?.inputs?.find((i) => i.name === "face_tracker");
+          if (latestCam?.running && state.activeTab === "calibrate") {
+            delete el.cameraStreamImg.dataset.streamId;
+            updateDeviceButtons(state.data.inputs);
+          }
+        }, 400);
+      }
+    });
+  }
+
   window.addEventListener("keydown", (e) => {
+    if (e.repeat) return;
     if (e.key === "F12") {
       e.preventDefault();
       el.btnEmergency.click();
-    } else if (e.code === "Space" && state.data?.scanner?.enabled && el.wizardBackdrop.classList.contains("hidden")) {
+      return;
+    }
+    const assistChannel = SHORTCUT_TO_CHANNEL[e.key];
+    if (assistChannel && el.wizardBackdrop.classList.contains("hidden")) {
+      const hasAssist = (state.data?.active_profile?.rules || []).some(
+        (r) => r.enabled && r.source === "keyboard_assist" && r.channel === assistChannel
+      );
+      if (hasAssist) {
+        e.preventDefault();
+        triggerPulse(assistChannel, "keyboard_assist");
+        return;
+      }
+    }
+    if (e.code === "Space" && state.data?.scanner?.enabled && el.wizardBackdrop.classList.contains("hidden")) {
       if (document.activeElement?.tagName !== "BUTTON") {
         e.preventDefault();
         triggerPulse("switch_1", "keyboard_assist");
@@ -979,6 +1118,8 @@ function connectWS() {
       state.data.scanner = msg.scanner;
       renderOutputsLog(state.data.recent_outputs);
       renderScanner(state.data.scanner);
+      renderAssistControls(state.data);
+      renderHomeControls(state.data);
     }
   };
 }

@@ -62,6 +62,18 @@
         <button id="btn-big-switch" class="btn-primary btn-large" style="width: 100%;" data-i18n="home.scanner_big_btn">TRIGGER SINGLE SWITCH (SPACE)</button>
       </div>
 
+      <!-- Accessible Assist Controls (One-Hand / Blind) -->
+      <div id="assist-section" class="card hidden" style="margin-top: 1.25rem;">
+        <div class="row-between" style="margin-bottom: 0.75rem;">
+          <div>
+            <h2 data-i18n="home.assist_title">Quick Assist Controls</h2>
+            <p class="hint" style="margin: 0;" data-i18n="home.assist_hint">Click any button or use F6-F8 anytime.</p>
+          </div>
+          <span class="badge" data-i18n="home.assist_badge">Shortcuts: F6 - F8</span>
+        </div>
+        <div id="assist-buttons" class="assist-grid" role="group" data-i18n-aria="home.assist_title" aria-label="Quick Assist Controls"></div>
+      </div>
+
       <!-- Active Controls Cheat-Sheet -->
       <div class="card" style="margin-top: 1.25rem;">
         <h2 data-i18n="home.controls_title">Active Controls</h2>

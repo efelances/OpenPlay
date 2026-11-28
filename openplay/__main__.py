@@ -167,7 +167,10 @@ def main(argv: list[str] | None = None) -> int:
         server_thread.join(timeout=3.0)
         return 0 if ok else 1
 
-    hotkeys = GlobalHotkeyMonitor(on_emergency=runtime.emergency_stop)
+    hotkeys = GlobalHotkeyMonitor(
+        on_emergency=runtime.emergency_stop,
+        on_channel=lambda ch, val: runtime.keyboard_assist.trigger_channel(ch, val),
+    )
     hotkeys.start()
     runtime.announce_key("announce.welcome")
 

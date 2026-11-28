@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from openplay import __version__
 from openplay.app import create_app
 
 
@@ -22,6 +23,7 @@ def test_root_state_and_i18n_endpoints(fresh_data_dir: Path):
         r_state = client.get("/api/state")
         assert r_state.status_code == 200
         state = r_state.json()
+        assert state["version"] == __version__ == "0.4.0"
         assert state["active_profile"]["id"] == "hybrid_head_eye_action"
         assert len(state["profiles"]) == 8
         assert "voice_languages" in state
@@ -193,3 +195,80 @@ def test_devices_noise_calibration_and_hardware_settings_persist(fresh_data_dir:
         assert st2["low_light_camera_mode"] is False
         assert st2["mic_gain"] == 8.5
         assert st2["mic_noise_floor"] == 0.042
+
+
+def test_single_switch_scan_thresholds_persist_via_tuning(fresh_data_dir: Path):
+    with TestClient(create_app(data_dir=fresh_data_dir)) as client:
+        assert client.get("/").status_code == 200
+        r_prof = client.post("/api/profile/single_switch_scan")
+        assert r_prof.status_code == 200
+
+        r_tune = client.post(
+            "/api/tuning",
+            json={"channel_thresholds": {"mouth_open": 0.80, "audio_level": 0.70}},
+        )
+        assert r_tune.status_code == 200
+        scan = r_tune.json()["active_profile"]["switch_scan"]
+        assert scan["face_threshold"] == 0.80
+        assert scan["audio_threshold"] == 0.70
+
+    with TestClient(create_app(data_dir=fresh_data_dir)) as client2:
+        scan2 = client2.get("/api/state").json()["active_profile"]["switch_scan"]
+        assert scan2["face_threshold"] == 0.80
+        assert scan2["audio_threshold"] == 0.70
+
+
+def test_devices_and_diagnostics_run_in_threadpool(fresh_data_dir: Path, monkeypatch):
+    import asyncio
+    import threading
+
+    import openplay.app as app_mod
+
+    main_tid = threading.get_ident()
+    seen_tids: dict[str, int] = {}
+
+    def _fake_diag(_runtime):
+        seen_tids["diag"] = threading.get_ident()
+        return [{"id": "python", "status": "ok", "detail": "test"}]
+
+    monkeypatch.setattr(app_mod, "run_diagnostics", _fake_diag)
+
+    with TestClient(create_app(data_dir=fresh_data_dir)) as client:
+        orig_list = client.app.state.runtime.list_devices
+
+        def _wrapped_devices():
+            seen_tids["devices"] = threading.get_ident()
+            return orig_list()
+
+        monkeypatch.setattr(client.app.state.runtime, "list_devices", _wrapped_devices)
+        assert client.get("/api/diagnostics").status_code == 200
+        assert client.get("/api/devices").status_code == 200
+
+    assert seen_tids["diag"] != main_tid
+    assert seen_tids["devices"] != main_tid
+
+
+def test_assist_profiles_trigger_via_simulate_and_tick(fresh_data_dir: Path):
+    with TestClient(create_app(data_dir=fresh_data_dir)) as client:
+        assert client.get("/").status_code == 200
+
+        r_one = client.post("/api/profile/one_hand_assist")
+        assert r_one.status_code == 200
+        channels = {r["channel"] for r in r_one.json()["active_profile"]["rules"]}
+        assert {"assist_toggle_walk", "assist_toggle_sprint", "assist_macro_1"}.issubset(channels)
+
+        assert client.post(
+            "/api/simulate",
+            json={"channel": "assist_toggle_walk", "value": 1.0, "source": "keyboard_assist"},
+        ).status_code == 200
+        st = client.get("/api/state").json()
+        assert st["active_toggles"]["toggle_walk"] is True
+
+        r_blind = client.post("/api/profile/blind_audio_guided")
+        assert r_blind.status_code == 200
+        assert client.post(
+            "/api/simulate",
+            json={"channel": "assist_macro_1", "value": 1.0, "source": "keyboard_assist"},
+        ).status_code == 200
+        st_blind = client.get("/api/state").json()
+        assert st_blind["recent_outputs"][0]["target"] == "e"

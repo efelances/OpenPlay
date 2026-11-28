@@ -105,7 +105,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         async def _ticker():
             while True:
                 runtime.tick()
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0.02)
 
         async def _signal_flusher():
             while True:
@@ -190,11 +190,12 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
 
     @app.get("/api/diagnostics")
     async def get_diagnostics():
-        return {"checks": run_diagnostics(runtime)}
+        checks = await asyncio.to_thread(run_diagnostics, runtime)
+        return {"checks": checks}
 
     @app.get("/api/devices")
     async def get_devices():
-        return runtime.list_devices()
+        return await asyncio.to_thread(runtime.list_devices)
 
     @app.post("/api/audio/calibrate-noise")
     async def calibrate_mic_noise():
@@ -240,8 +241,10 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         if not isinstance(face_provider, FaceTrackerProvider) or not face_provider.is_running:
             raise HTTPException(status_code=404, detail="Camera is not active")
 
+        bound_stream_id = face_provider.stream_id
+
         async def frame_gen():
-            while face_provider.is_running:
+            while face_provider.is_running and face_provider.stream_id == bound_stream_id:
                 jpg = face_provider.get_latest_jpeg()
                 if jpg:
                     yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n"

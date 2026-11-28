@@ -350,6 +350,26 @@ class AccessRuntime:
                         fields["threshold"] = max(0.15, min(0.95, threshold))
                 if fields:
                     self.profile_manager.set_rule_override(pid, rule.id, **fields)
+            if self.engine.profile.switch_scan.enabled:
+                scan_fields: dict[str, Any] = {}
+                if channel_thresholds is not None:
+                    face_th = channel_thresholds.get("switch_face")
+                    if face_th is None:
+                        face_th = channel_thresholds.get("mouth_open")
+                    if face_th is not None:
+                        scan_fields["face_threshold"] = max(0.15, min(0.95, float(face_th)))
+
+                    audio_th = channel_thresholds.get("switch_audio")
+                    if audio_th is None:
+                        audio_th = channel_thresholds.get("audio_level")
+                    if audio_th is not None:
+                        scan_fields["audio_threshold"] = max(0.15, min(0.95, float(audio_th)))
+                elif threshold is not None:
+                    clamped = max(0.15, min(0.95, float(threshold)))
+                    scan_fields["face_threshold"] = clamped
+                    scan_fields["audio_threshold"] = clamped
+                if scan_fields:
+                    self.profile_manager.set_switch_scan_override(pid, **scan_fields)
         self._save_state()
         snapshot = self.get_state_snapshot()
         self._broadcast_threadsafe({"type": "state", "state": snapshot})

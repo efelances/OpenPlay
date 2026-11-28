@@ -78,7 +78,7 @@ def recommend_setup(answers: WizardAnswers) -> WizardRecommendation:
     if "head_face" in abilities and has_webcam and "glasses_no_wink" in support:
         return _build_recommendation(
             "glasses_friendly_action",
-            ["face_tracker"] + (["audio_trigger"] if has_mic else []),
+            ["face_tracker"] + (["audio_trigger"] if (has_mic or "sound_breath" in abilities) else []),
             flags,
         )
 
@@ -88,7 +88,7 @@ def recommend_setup(answers: WizardAnswers) -> WizardRecommendation:
     if "head_face" in abilities and has_webcam:
         return _build_recommendation("head_face_handsfree", ["face_tracker"], flags)
 
-    if "sound_breath" in abilities and has_mic:
+    if "sound_breath" in abilities:
         return _build_recommendation("acoustic_nonverbal", ["audio_trigger"], flags)
 
     if "tts_screenreader" in support and not ({"one_hand", "head_face", "eye_only"} & abilities):

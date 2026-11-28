@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -30,15 +31,46 @@ class AudioDSPProcessor:
 
         self._peak_rms: float = 0.12
         self._agc_mult: float = 1.0
+        self._lock = threading.Lock()
         self._cal_end_ts: float = 0.0
         self._cal_samples: list[float] = []
         self._cal_active: bool = False
+        self._fft_cache_key: tuple[int, float] | None = None
+        self._cached_win: Any = None
+        self._cached_freqs: Any = None
+        self._cached_mask: Any = None
+        self._cached_weights: Any = None
+
+    def _get_fft_tables(self, n: int, sr: float):
+        key = (n, sr)
+        if self._fft_cache_key == key and self._cached_win is not None:
+            return self._cached_win, self._cached_freqs, self._cached_mask, self._cached_weights
+
+        win = np.hanning(n).astype(np.float32)
+        win_rms = float(np.sqrt(np.mean(win * win)))
+        win_norm = (win / win_rms) if win_rms > 1e-6 else np.ones(n, dtype=np.float32)
+
+        freqs = np.fft.rfftfreq(n, d=1.0 / max(1000.0, sr))
+        w = np.full(freqs.shape, 2.0, dtype=np.float32)
+        w[0] = 0.0
+        if n % 2 == 0 and w.size > 1:
+            w[-1] = 1.0
+        mask = (freqs >= 140.0) & (freqs <= 4200.0)
+        weights = w[mask]
+
+        self._fft_cache_key = key
+        self._cached_win = win_norm
+        self._cached_freqs = freqs
+        self._cached_mask = mask
+        self._cached_weights = weights
+        return win_norm, freqs, mask, weights
 
     def start_noise_calibration(self, duration_sec: float = 1.5, now: float | None = None) -> None:
         ts = time.monotonic() if now is None else float(now)
-        self._cal_samples = []
-        self._cal_active = True
-        self._cal_end_ts = ts + max(0.2, float(duration_sec))
+        with self._lock:
+            self._cal_samples = []
+            self._cal_active = True
+            self._cal_end_ts = ts + max(0.2, float(duration_sec))
 
     def process_block(self, samples: Any, now: float | None = None) -> tuple[float, bool]:
         """Process one audio frame block and return (normalized_level [0..1], calibration_finished)."""
@@ -54,46 +86,35 @@ class AudioDSPProcessor:
         n = int(x.size)
 
         if self.noise_suppression and n >= 16:
-            win = np.hanning(n).astype(np.float32)
-            win_rms = float(np.sqrt(np.mean(win * win)))
-            if win_rms > 1e-6:
-                xw = x * (win / win_rms)
-            else:
-                xw = x
+            win_norm, _freqs, mask, weights = self._get_fft_tables(n, self.samplerate)
+            xw = x * win_norm
             spec = np.fft.rfft(xw)
-            freqs = np.fft.rfftfreq(n, d=1.0 / max(1000.0, self.samplerate))
-
-            w = np.full(spec.shape, 2.0, dtype=np.float32)
-            w[0] = 0.0
-            if n % 2 == 0 and w.size > 1:
-                w[-1] = 1.0
-
-            mask = (freqs >= 140.0) & (freqs <= 4200.0)
-            power = float(np.sum(w[mask] * (np.abs(spec[mask]) ** 2)))
+            power = float(np.sum(weights * (np.abs(spec[mask]) ** 2)))
             rms = float(np.sqrt(max(0.0, power / (n * n))))
         else:
             rms = float(np.sqrt(np.mean(x * x)))
 
         ts = time.monotonic() if now is None else float(now)
-        if self._cal_active:
-            self._cal_samples.append(rms)
-            if ts >= self._cal_end_ts:
-                p85 = float(np.percentile(self._cal_samples, 85)) if self._cal_samples else 0.005
-                self.noise_floor = max(0.002, min(0.5, p85 * 1.35))
-                self._cal_active = False
-                return 0.0, True
-            return 0.0, False
+        with self._lock:
+            if self._cal_active:
+                self._cal_samples.append(rms)
+                if ts >= self._cal_end_ts:
+                    p85 = float(np.percentile(self._cal_samples, 85)) if self._cal_samples else 0.005
+                    self.noise_floor = max(0.002, min(0.5, p85 * 1.35))
+                    self._cal_active = False
+                    return 0.0, True
+                return 0.0, False
 
-        if self.noise_suppression:
-            if self.noise_floor <= 0.0:
-                self.noise_floor = min(rms, 0.05)
-            elif rms < self.noise_floor:
-                self.noise_floor += (rms - self.noise_floor) * 0.08
-            elif rms < self.noise_floor * 1.45:
-                self.noise_floor += (rms - self.noise_floor) * 0.004
-            gate = self.noise_floor * 1.25
-        else:
-            gate = 0.0
+            if self.noise_suppression:
+                if self.noise_floor <= 0.0:
+                    self.noise_floor = min(rms, 0.05)
+                elif rms < self.noise_floor:
+                    self.noise_floor += (rms - self.noise_floor) * 0.08
+                elif rms < self.noise_floor * 1.45:
+                    self.noise_floor += (rms - self.noise_floor) * 0.004
+                gate = self.noise_floor * 1.25
+            else:
+                gate = 0.0
 
         clean_rms = max(0.0, rms - gate)
 
@@ -110,9 +131,12 @@ class AudioDSPProcessor:
         return float(level), False
 
     def get_telemetry(self) -> dict[str, Any]:
+        with self._lock:
+            noise_floor = self.noise_floor
+            cal_active = self._cal_active
         return {
             "samplerate": int(self.samplerate),
-            "noise_floor": round(self.noise_floor, 4),
-            "calibrating_noise": self._cal_active,
+            "noise_floor": round(noise_floor, 4),
+            "calibrating_noise": cal_active,
             "effective_gain": round(self.gain * self._agc_mult, 2),
         }

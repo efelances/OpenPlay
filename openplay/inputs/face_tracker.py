@@ -70,6 +70,7 @@ class FaceTrackerProvider(InputProvider):
         self._latest_jpeg: bytes | None = None
         self._status_code_override: str = ""
         self._downloading: bool = False
+        self._stream_id: int = 0
         self._telemetry_lock = threading.Lock()
         self._telemetry: dict[str, Any] = {
             "fps": 0.0,
@@ -78,7 +79,17 @@ class FaceTrackerProvider(InputProvider):
             "face_detected": False,
             "enhanced": False,
             "camera_index": self.camera_index,
+            "stream_id": 0,
         }
+
+    @property
+    def stream_id(self) -> int:
+        return self._stream_id
+
+    def info(self) -> dict[str, Any]:
+        data = super().info()
+        data["stream_id"] = self._stream_id
+        return data
 
     def get_latest_jpeg(self) -> bytes | None:
         with self._frame_lock:
@@ -153,6 +164,9 @@ class FaceTrackerProvider(InputProvider):
         self._running = True
         self._last_error = ""
         self._status_code_override = ""
+        self._stream_id += 1
+        with self._frame_lock:
+            self._latest_jpeg = None
         self._set_telemetry(
             fps=0.0,
             brightness=0.0,
@@ -160,6 +174,7 @@ class FaceTrackerProvider(InputProvider):
             face_detected=False,
             enhanced=False,
             camera_index=self.camera_index,
+            stream_id=self._stream_id,
         )
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()

@@ -29,6 +29,10 @@
   "home.controls_title": "Active Controls",
   "home.controls_hint": "See which movement triggers each game action below.",
   "home.control_on_suffix": "ON",
+  "home.control_off_suffix": "OFF",
+  "home.assist_title": "Quick Assist Controls",
+  "home.assist_hint": "Click any button below or press F6-F8 anytime (even in-game).",
+  "home.assist_badge": "Shortcuts: F6 - F8",
 
   "cal.cam_title": "1. Camera & Center Calibration",
   "cal.cam_alt": "Live webcam preview",

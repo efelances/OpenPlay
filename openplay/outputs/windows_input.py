@@ -12,17 +12,12 @@ from openplay.outputs.base import OutputAdapter
 
 logger = logging.getLogger(__name__)
 _IS_WINDOWS = sys.platform == "win32"
+_USER32 = ctypes.WinDLL("user32", use_last_error=True) if _IS_WINDOWS else None
 
-# Virtual-Key codes for common gaming keys
+# Virtual-Key codes for alphanumeric and common gaming keys
 VK_CODES: dict[str, int] = {
-    "w": 0x57,
-    "a": 0x41,
-    "s": 0x53,
-    "d": 0x44,
-    "e": 0x45,
-    "f": 0x46,
-    "r": 0x52,
-    "q": 0x51,
+    **{str(d): 0x30 + d for d in range(10)},
+    **{chr(c): c for c in range(ord("A"), ord("Z") + 1)},
     "space": 0x20,
     "shift": 0x10,
     "ctrl": 0x11,
@@ -30,11 +25,13 @@ VK_CODES: dict[str, int] = {
     "tab": 0x09,
     "enter": 0x0D,
     "esc": 0x1B,
+    "backspace": 0x08,
     "up": 0x26,
     "down": 0x28,
     "left": 0x25,
     "right": 0x27,
 }
+VK_CODES = {k.lower(): v for k, v in VK_CODES.items()}
 
 _EXTENDED_VKS = frozenset({0x25, 0x26, 0x27, 0x28})
 
@@ -74,13 +71,15 @@ if _IS_WINDOWS:
     _MOUSEEVENTF_LEFTUP = 0x0004
     _MOUSEEVENTF_RIGHTDOWN = 0x0008
     _MOUSEEVENTF_RIGHTUP = 0x0010
+    _MOUSEEVENTF_MIDDLEDOWN = 0x0020
+    _MOUSEEVENTF_MIDDLEUP = 0x0040
 
 
 def build_key_input(vk: int, pressed: bool) -> "_INPUT":
     """Build a Windows SendInput KEYBDINPUT struct using hardware scan codes."""
-    if not _IS_WINDOWS:
+    if not _IS_WINDOWS or _USER32 is None:
         raise RuntimeError("build_key_input is only supported on Windows")
-    scan = ctypes.windll.user32.MapVirtualKeyW(vk, 0)
+    scan = _USER32.MapVirtualKeyW(vk, 0)
     flags = _KEYEVENTF_SCANCODE
     if not pressed:
         flags |= _KEYEVENTF_KEYUP
@@ -138,8 +137,7 @@ class WindowsInputAdapter(OutputAdapter):
             return True
 
         if command.output_type == OutputType.MOUSE_BUTTON:
-            self._send_mouse_button(command.target.lower(), pressed=command.value >= 0.5)
-            return True
+            return self._send_mouse_button(command.target.lower(), pressed=command.value >= 0.5)
 
         if command.output_type == OutputType.MOUSE_AXIS:
             delta = command.value * self.mouse_speed
@@ -150,26 +148,31 @@ class WindowsInputAdapter(OutputAdapter):
         return False
 
     def _send_struct(self, inp: "_INPUT") -> None:
-        sent = ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
+        if _USER32 is None:
+            return
+        sent = _USER32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(inp))
         if sent == 0:
-            err = ctypes.GetLastError()
+            err = ctypes.get_last_error()
             logger.warning("SendInput returned 0 (lastError=%s)", err)
 
     def _send_key(self, vk: int, pressed: bool) -> None:
         self._send_struct(build_key_input(vk, pressed))
 
-    def _send_mouse_button(self, button: str, pressed: bool) -> None:
+    def _send_mouse_button(self, button: str, pressed: bool) -> bool:
         if button == "left":
             flag = _MOUSEEVENTF_LEFTDOWN if pressed else _MOUSEEVENTF_LEFTUP
         elif button == "right":
             flag = _MOUSEEVENTF_RIGHTDOWN if pressed else _MOUSEEVENTF_RIGHTUP
+        elif button == "middle":
+            flag = _MOUSEEVENTF_MIDDLEDOWN if pressed else _MOUSEEVENTF_MIDDLEUP
         else:
-            return
+            return False
         inp = _INPUT(
             type=_INPUT_MOUSE,
             union=_INPUT_UNION(mi=_MOUSEINPUT(dx=0, dy=0, mouseData=0, dwFlags=flag, time=0, dwExtraInfo=0)),
         )
         self._send_struct(inp)
+        return True
 
     def _send_mouse_move(self, dx: int, dy: int) -> None:
         inp = _INPUT(

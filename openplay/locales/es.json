@@ -29,6 +29,10 @@
   "home.controls_title": "Controles Activos",
   "home.controls_hint": "Consulta qué movimiento activa cada tecla del juego.",
   "home.control_on_suffix": "ACTIVO",
+  "home.control_off_suffix": "APAGADO",
+  "home.assist_title": "Controles Rápidos de Asistencia",
+  "home.assist_hint": "Pulsa cualquier botón o usa F6-F8 en cualquier momento (incluso en el juego).",
+  "home.assist_badge": "Atajos: F6 - F8",
 
   "cal.cam_title": "1. Cámara y Calibración Central",
   "cal.cam_alt": "Vista previa de cámara web",

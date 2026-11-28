@@ -29,6 +29,10 @@
   "home.controls_title": "Aktive Steuerung",
   "home.controls_hint": "Hier siehst du, welche Bewegung welche Spielaktion auslöst.",
   "home.control_on_suffix": "AN",
+  "home.control_off_suffix": "AUS",
+  "home.assist_title": "Schnell-Assistent-Steuerung",
+  "home.assist_hint": "Klicke auf einen Button oder nutze jederzeit F6-F8 (auch im Spiel).",
+  "home.assist_badge": "Tastenkürzel: F6 - F8",
 
   "cal.cam_title": "1. Kamera & Zentrierung",
   "cal.cam_alt": "Live-Webcam-Vorschau",

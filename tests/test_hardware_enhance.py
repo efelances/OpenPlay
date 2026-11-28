@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+import sys
+import threading
+from pathlib import Path
+
 import numpy as np
 
 from openplay.inputs.audio_dsp import AudioDSPProcessor
@@ -11,6 +16,8 @@ from openplay.inputs.camera_enhance import (
     enhance_low_light_frame,
     light_quality_code,
 )
+from openplay.inputs.face_tracker import FaceTrackerProvider
+from openplay.logging_setup import setup_logging
 
 
 def test_low_light_enhancement_brightens_dark_frames_and_skips_bright():
@@ -113,3 +120,92 @@ def test_audio_dsp_auto_gain_lifts_quiet_mic():
         lvl_agc, _ = dsp_agc.process_block(quiet_signal, now=float(i) * 0.03)
 
     assert lvl_agc > lvl_no_agc * 2.0
+
+
+def test_audio_dsp_caches_fft_tables_and_calibration_is_thread_safe():
+    dsp = AudioDSPProcessor(samplerate=16000, noise_suppression=True)
+    block = 0.05 * np.sin(2.0 * np.pi * 600.0 * (np.arange(512, dtype=np.float32) / 16000.0))
+
+    dsp.process_block(block, now=0.1)
+    win1 = dsp._cached_win
+    freqs1 = dsp._cached_freqs
+    dsp.process_block(block, now=0.2)
+    assert dsp._cached_win is win1
+    assert dsp._cached_freqs is freqs1
+
+    # Different samplerate invalidates and rebuilds cache
+    dsp.samplerate = 48000.0
+    dsp.process_block(block, now=0.3)
+    assert dsp._fft_cache_key == (512, 48000.0)
+    assert dsp._cached_freqs is not freqs1
+
+    # Concurrent calibration + processing + telemetry does not raise
+    errors: list[Exception] = []
+
+    def _worker():
+        try:
+            for idx in range(30):
+                dsp.process_block(block)
+                if idx % 10 == 0:
+                    dsp.get_telemetry()
+        except Exception as exc:
+            errors.append(exc)
+
+    dsp.start_noise_calibration(duration_sec=0.2)
+    threads = [threading.Thread(target=_worker) for _ in range(3)]
+    for t_obj in threads:
+        t_obj.start()
+    for t_obj in threads:
+        t_obj.join()
+    assert errors == []
+
+
+def test_face_tracker_stream_id_increments_and_exposes_in_info(monkeypatch, tmp_path: Path):
+    tracker = FaceTrackerProvider(data_dir=tmp_path)
+    monkeypatch.setattr(tracker, "is_available", lambda: True)
+    monkeypatch.setattr(tracker, "_run_loop", lambda: None)
+
+    assert tracker.stream_id == 0
+    assert tracker.start(lambda _sig: None) is True
+    assert tracker.stream_id == 1
+    assert tracker.info()["stream_id"] == 1
+    tracker.stop()
+
+    assert tracker.start(lambda _sig: None) is True
+    assert tracker.stream_id == 2
+    assert tracker.info()["stream_id"] == 2
+    tracker.stop()
+
+
+def test_logging_setup_separates_stdio_log_from_rotating_log(monkeypatch, tmp_path: Path):
+    import openplay.logging_setup as ls
+
+    monkeypatch.setattr(ls, "_CONFIGURED", False)
+    root_logger = logging.getLogger("openplay")
+    old_handlers = list(root_logger.handlers)
+    root_logger.handlers.clear()
+
+    old_stdout, old_stderr = sys.stdout, sys.stderr
+    try:
+        monkeypatch.setattr(sys, "stdout", None)
+        monkeypatch.setattr(sys, "stderr", None)
+        log_file = setup_logging(tmp_path / "logs")
+        assert log_file.name == "openplay.log"
+        assert (tmp_path / "logs" / "stdio.log").exists()
+        assert sys.stdout is not None and Path(sys.stdout.name).name == "stdio.log"
+
+        # RotatingFileHandler rollover must succeed without WinError 32
+        root_logger.info("hello before rollover")
+        for h in root_logger.handlers:
+            if hasattr(h, "doRollover"):
+                h.doRollover()
+        assert (tmp_path / "logs" / "openplay.log.1").exists()
+    finally:
+        for h in list(root_logger.handlers):
+            h.close()
+        root_logger.handlers.clear()
+        root_logger.handlers.extend(old_handlers)
+        if sys.stdout not in (None, old_stdout):
+            sys.stdout.close()
+        sys.stdout = old_stdout
+        sys.stderr = old_stderr

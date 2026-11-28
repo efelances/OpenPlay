@@ -128,7 +128,7 @@ def compute_signals(
         gaze_x = clamp(bs_gx + head_yaw * 0.65, -1.0, 1.0)
         gaze_y = clamp(bs_gy + head_pitch * 0.65, -1.0, 1.0)
 
-    switch_face = 1.0 if mouth_open > 0.65 else 0.0
+    switch_face = mouth_open
 
     return {
         "head_yaw": head_yaw,

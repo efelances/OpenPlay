@@ -87,7 +87,7 @@ class ScanAction(BaseModel):
     output_type: OutputType = OutputType.KEYBOARD
     target: str
     mode: ActionMode = ActionMode.PULSE
-    pulse_ms: int = 180
+    pulse_ms: int = Field(default=100, ge=20, le=2000)
 
 
 class SwitchScanConfig(BaseModel):
@@ -97,6 +97,8 @@ class SwitchScanConfig(BaseModel):
     trigger_channel: str = "switch_1"
     interval_ms: int = Field(default=1400, ge=400, le=6000)
     announce_items: bool = True
+    face_threshold: float = Field(default=0.65, ge=0.15, le=0.95)
+    audio_threshold: float = Field(default=0.55, ge=0.15, le=0.95)
     actions: list[ScanAction] = Field(default_factory=list)
 
 

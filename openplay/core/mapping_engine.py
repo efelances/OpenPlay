@@ -37,6 +37,12 @@ class SwitchScannerState:
     active_toggles: dict[str, bool] = field(default_factory=dict)
 
 
+@dataclass
+class _ScheduledCommand:
+    due_ts: float
+    command: OutputCommand
+
+
 class MappingEngine:
     """Transforms normalized InputSignals into OutputCommands using active Profile rules."""
 
@@ -52,6 +58,7 @@ class MappingEngine:
         self._calibration_offsets: dict[str, float] = {}
         self._latest_signals: dict[str, float] = {}
         self._active_outputs: dict[str, OutputCommand] = {}
+        self._scheduled: list[_ScheduledCommand] = []
 
     def set_profile(self, profile: Profile) -> list[OutputCommand]:
         """Switch active profile and release any currently held outputs safely."""
@@ -97,6 +104,7 @@ class MappingEngine:
             state.active_pulse_until = 0.0
             state.last_out = 0.0
         self._scanner.active_toggles.clear()
+        self._scheduled.clear()
         return commands
 
     def process_signal(self, signal: InputSignal, now: float | None = None) -> list[OutputCommand]:
@@ -128,6 +136,16 @@ class MappingEngine:
         """Periodic update for pulse releases and switch-scanning progression."""
         ts = now if now is not None else time.monotonic()
         commands: list[OutputCommand] = []
+
+        # Flush scheduled delayed press/release commands (macros and scan pulses)
+        if self._scheduled:
+            ready = [item for item in self._scheduled if ts >= item.due_ts]
+            if ready:
+                self._scheduled = [item for item in self._scheduled if ts < item.due_ts]
+                ready.sort(key=lambda item: item.due_ts)
+                for item in ready:
+                    self._track_output(item.command)
+                    commands.append(item.command)
 
         # Release expired pulses
         for rule in self.profile.rules:
@@ -200,10 +218,21 @@ class MappingEngine:
             val = -state.smoothed_value if rule.invert else state.smoothed_value
             return self._eval_analog(rule, state, val)
 
-        # Digital modes use standard Exponential Moving Average (EMA) smoothing
-        alpha = 1.0 - rule.smoothing
-        state.smoothed_value = alpha * raw_val + (1.0 - alpha) * state.smoothed_value
-        val = -state.smoothed_value if rule.invert else state.smoothed_value
+        # Digital modes: immediate rising response (so fast test pulses and high
+        # thresholds >=70% trigger reliably) plus fast zero release, while
+        # lightly smoothing small noisy dips during sustained holds.
+        in_val = -raw_val if rule.invert else raw_val
+        if (
+            rule.smoothing <= 0.0
+            or in_val >= state.smoothed_value
+            or in_val <= 0.01
+            or (state.smoothed_value - in_val) >= 0.35
+        ):
+            state.smoothed_value = in_val
+        else:
+            decay_alpha = max(0.5, 1.0 - min(rule.smoothing, 0.35))
+            state.smoothed_value = decay_alpha * in_val + (1.0 - decay_alpha) * state.smoothed_value
+        val = state.smoothed_value
 
         # Digital modes use threshold + hysteresis (0.1 lower release threshold)
         release_threshold = max(0.05, rule.threshold - 0.1)
@@ -256,11 +285,51 @@ class MappingEngine:
                 targets = rule.macro_targets or [rule.target]
                 if rule.announce_tts:
                     self._announce("announce.macro", name_key=f"rule.{rule.id}")
-                cmds: list[OutputCommand] = []
-                for target in targets:
-                    cmds.append(OutputCommand(output_type=rule.output_type, target=target, value=1.0, label=f"rule.{rule.id}"))
-                    cmds.append(OutputCommand(output_type=rule.output_type, target=target, value=0.0, label=f"rule.{rule.id}"))
-                return cmds
+                hold_s = max(0.08, min(0.12, rule.pulse_ms / 1000.0))
+                gap_s = 0.03
+                first_cmd = OutputCommand(
+                    output_type=rule.output_type,
+                    target=targets[0],
+                    value=1.0,
+                    label=f"rule.{rule.id}",
+                )
+                self._track_output(first_cmd)
+                self._scheduled.append(
+                    _ScheduledCommand(
+                        due_ts=ts + hold_s,
+                        command=OutputCommand(
+                            output_type=rule.output_type,
+                            target=targets[0],
+                            value=0.0,
+                            label=f"rule.{rule.id}",
+                        ),
+                    )
+                )
+                for idx, target in enumerate(targets[1:], start=1):
+                    press_ts = ts + idx * (hold_s + gap_s)
+                    self._scheduled.append(
+                        _ScheduledCommand(
+                            due_ts=press_ts,
+                            command=OutputCommand(
+                                output_type=rule.output_type,
+                                target=target,
+                                value=1.0,
+                                label=f"rule.{rule.id}",
+                            ),
+                        )
+                    )
+                    self._scheduled.append(
+                        _ScheduledCommand(
+                            due_ts=press_ts + hold_s,
+                            command=OutputCommand(
+                                output_type=rule.output_type,
+                                target=target,
+                                value=0.0,
+                                label=f"rule.{rule.id}",
+                            ),
+                        )
+                    )
+                return [first_cmd]
             return []
 
         return []
@@ -287,13 +356,21 @@ class MappingEngine:
         scan = self.profile.switch_scan
         if not scan.actions:
             return []
+        if channel == "switch_face":
+            threshold = scan.face_threshold
+        elif channel == "switch_audio":
+            threshold = scan.audio_threshold
+        else:
+            threshold = 0.5
+        release_threshold = max(0.05, threshold - 0.15)
+
         state = self._rule_states.setdefault(f"__switch__{channel}", _RuleRuntimeState())
         was_triggered = state.is_triggered
-        if not was_triggered and val >= 0.5:
+        if not was_triggered and val >= threshold:
             if (ts - state.last_trigger_ts) * 1000.0 >= 300:
                 state.is_triggered = True
                 state.last_trigger_ts = ts
-        elif was_triggered and val < 0.35:
+        elif was_triggered and val < release_threshold:
             state.is_triggered = False
 
         if not (not was_triggered and state.is_triggered):
@@ -315,10 +392,26 @@ class MappingEngine:
             return [cmd]
 
         self._announce("announce.selected", name_key=f"scan.{action.id}")
-        return [
-            OutputCommand(output_type=action.output_type, target=action.target, value=1.0, label=f"scan.{action.id}"),
-            OutputCommand(output_type=action.output_type, target=action.target, value=0.0, label=f"scan.{action.id}"),
-        ]
+        hold_s = max(0.08, min(0.12, action.pulse_ms / 1000.0))
+        press_cmd = OutputCommand(
+            output_type=action.output_type,
+            target=action.target,
+            value=1.0,
+            label=f"scan.{action.id}",
+        )
+        self._track_output(press_cmd)
+        self._scheduled.append(
+            _ScheduledCommand(
+                due_ts=ts + hold_s,
+                command=OutputCommand(
+                    output_type=action.output_type,
+                    target=action.target,
+                    value=0.0,
+                    label=f"scan.{action.id}",
+                ),
+            )
+        )
+        return [press_cmd]
 
     def _track_output(self, cmd: OutputCommand) -> None:
         key = f"{cmd.output_type.value}:{cmd.target}"

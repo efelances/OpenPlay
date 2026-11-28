@@ -29,6 +29,10 @@
   "home.controls_title": "Bu Profildeki Kontroller",
   "home.controls_hint": "Oyunda hangi hareketin hangi tuşa karşılık geldiğini aşağıdan görebilirsin.",
   "home.control_on_suffix": "AÇIK",
+  "home.control_off_suffix": "KAPALI",
+  "home.assist_title": "Hızlı Asistan Kontrolleri",
+  "home.assist_hint": "Aşağıdaki butonlara tıkla veya oyun içindeyken F6-F8 kısayollarına bas.",
+  "home.assist_badge": "Kısayollar: F6 - F8",
 
   "cal.cam_title": "1. Kamera & Merkez Kalibrasyonu",
   "cal.cam_alt": "Canlı webcam önizlemesi",

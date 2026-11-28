@@ -210,3 +210,123 @@ def test_wizard_recommendations():
     assert rec_blind.profile_id == "blind_audio_guided"
     assert rec_blind.recommended_flags["high_contrast"] is True
     assert rec_blind.recommended_flags["tts_enabled"] is True
+
+    rec_sound_no_mic = recommend_setup(
+        WizardAnswers(abilities=["sound_breath"], equipment=["webcam", "keyboard_mouse"])
+    )
+    assert rec_sound_no_mic.profile_id == "acoustic_nonverbal"
+    assert rec_sound_no_mic.recommended_inputs == ["audio_trigger"]
+
+
+def test_digital_fast_test_triggers_at_high_thresholds_and_releases_cleanly():
+    for th in (0.20, 0.75, 0.90, 0.95):
+        profile = Profile(
+            id="test_high_th",
+            name="Test High Threshold",
+            description="",
+            target_group="",
+            rules=[
+                MappingRule(
+                    id="wink",
+                    name="rule.hybrid_shoot",
+                    source="face_tracker",
+                    channel="wink_right",
+                    mode=ActionMode.PRESS,
+                    output_type=OutputType.MOUSE_BUTTON,
+                    target="left",
+                    threshold=th,
+                    smoothing=0.35,
+                    cooldown_ms=0,
+                )
+            ],
+        )
+        engine = MappingEngine(profile)
+        cmds = engine.process_signal(
+            InputSignal(source="face_tracker", channel="wink_right", value=1.0),
+            now=1.0,
+        )
+        assert len(cmds) == 1 and cmds[0].value == 1.0
+
+        rel = engine.process_signal(
+            InputSignal(source="face_tracker", channel="wink_right", value=0.0),
+            now=1.1,
+        )
+        assert len(rel) == 1 and rel[0].value == 0.0
+
+
+def test_macro_and_switch_scan_pulse_hold_duration_via_tick():
+    profile = Profile(
+        id="test_macro",
+        name="Test Macro",
+        description="",
+        target_group="",
+        rules=[
+            MappingRule(
+                id="combo",
+                name="rule.combo_dodge",
+                source="keyboard_assist",
+                channel="assist_macro_1",
+                mode=ActionMode.MACRO,
+                output_type=OutputType.KEYBOARD,
+                target="space",
+                macro_targets=["space", "e"],
+                threshold=0.5,
+                pulse_ms=100,
+                cooldown_ms=0,
+            )
+        ],
+    )
+    engine = MappingEngine(profile)
+    cmds = engine.process_signal(
+        InputSignal(source="keyboard_assist", channel="assist_macro_1", value=1.0),
+        now=1.0,
+    )
+    assert len(cmds) == 1
+    assert cmds[0].target == "space" and cmds[0].value == 1.0
+
+    # Still held before 100 ms
+    assert engine.tick(now=1.05) == []
+    # Released at >= 100 ms
+    rel1 = engine.tick(now=1.10)
+    assert len(rel1) == 1 and rel1[0].target == "space" and rel1[0].value == 0.0
+
+    # Second macro key pressed after gap (1.13s) and released after hold (1.23s)
+    press2 = engine.tick(now=1.14)
+    assert len(press2) == 1 and press2[0].target == "e" and press2[0].value == 1.0
+    rel2 = engine.tick(now=1.25)
+    assert len(rel2) == 1 and rel2[0].target == "e" and rel2[0].value == 0.0
+
+    # release_all cancels pending macro steps
+    engine.process_signal(InputSignal(source="keyboard_assist", channel="assist_macro_1", value=0.0), now=1.3)
+    engine.process_signal(InputSignal(source="keyboard_assist", channel="assist_macro_1", value=1.0), now=1.4)
+    released = engine.release_all()
+    assert any(c.target == "space" and c.value == 0.0 for c in released)
+    assert engine.tick(now=2.0) == []
+
+
+def test_single_switch_scan_pulse_hold_and_custom_thresholds():
+    scan_profile = next(p for p in create_builtin_profiles() if p.id == "single_switch_scan")
+    scan_profile.switch_scan.face_threshold = 0.80
+    scan_profile.switch_scan.audio_threshold = 0.70
+    engine = MappingEngine(scan_profile)
+
+    # Advance scanner to index 1 (scan_jump: PULSE space)
+    engine.tick(now=1.0)
+    engine.tick(now=3.0)
+    assert engine.get_scanner_snapshot()["current_index"] == 1
+
+    # Below custom face threshold (0.72 < 0.80) -> ignored
+    assert engine.process_signal(InputSignal(source="face_tracker", channel="switch_face", value=0.72), now=3.1) == []
+
+    # At/above face threshold -> pressed immediately, released via tick after ~100 ms
+    cmds = engine.process_signal(InputSignal(source="face_tracker", channel="switch_face", value=0.85), now=3.2)
+    assert len(cmds) == 1 and cmds[0].target == "space" and cmds[0].value == 1.0
+    assert engine.tick(now=3.25) == []
+    rel = engine.tick(now=3.32)
+    assert len(rel) == 1 and rel[0].target == "space" and rel[0].value == 0.0
+
+    # Release switch_face, then verify custom audio threshold
+    engine.process_signal(InputSignal(source="face_tracker", channel="switch_face", value=0.0), now=3.4)
+    assert engine.process_signal(InputSignal(source="audio_trigger", channel="switch_audio", value=0.60), now=3.5) == []
+    cmds_audio = engine.process_signal(InputSignal(source="audio_trigger", channel="switch_audio", value=0.75), now=4.0)
+    assert len(cmds_audio) == 1 and cmds_audio[0].target == "space" and cmds_audio[0].value == 1.0

@@ -19,9 +19,12 @@ def setup_logging(log_dir: Path | None = None) -> Path:
     target_dir = log_dir if log_dir is not None else (get_data_dir() / "logs")
     target_dir.mkdir(parents=True, exist_ok=True)
     log_file = target_dir / "openplay.log"
+    stdio_file = target_dir / "stdio.log"
 
     if sys.stdout is None or sys.stderr is None:
-        stream = open(log_file, "a", encoding="utf-8", buffering=1)
+        # Keep stdio redirected to a separate file so RotatingFileHandler never
+        # hits WinError 32 on Windows when rolling over openplay.log.
+        stream = open(stdio_file, "a", encoding="utf-8", buffering=1)
         if sys.stdout is None:
             sys.stdout = stream  # type: ignore[assignment]
         if sys.stderr is None:
